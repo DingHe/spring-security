@@ -35,10 +35,19 @@ import org.springframework.util.Assert;
  * @author Josh Cummings
  * @since 5.1
  */
+// BearerTokenAuthenticationToken 是 Spring Security OAuth2 资源服务器（Resource Server）模块中的一个关键类。它专门用于处理符合 RFC 6750 标准的 Bearer Token（通常是 JWT 或不透明令牌）。
+// 要用于 OAuth2 资源服务器的认证预处理阶段。
+// 非对称性质：它是一个“未认证”的令牌。当客户端在 HTTP Header 中携带 Authorization: Bearer <token> 访问 API 时，
+// BearerTokenAuthenticationFilter 会截获这个字符串并将其封装进 BearerTokenAuthenticationToken。
+// 传递载体：它的唯一目的是将原始的加密字符串（Token）传递给后端的认证处理器（如 JwtAuthenticationProvider 或 OpaqueTokenAuthenticationProvider）。
+// 认证前后的转换：
+// 认证前：它是 BearerTokenAuthenticationToken（只包含一个字符串）。
+// 认证后：它会被转换成 JwtAuthenticationToken 或 BearerTokenAuthentication（包含解析后的 Claims 和真正的权限）。
 public class BearerTokenAuthenticationToken extends AbstractAuthenticationToken {
 
 	private static final long serialVersionUID = SpringSecurityCoreVersion.SERIAL_VERSION_UID;
-
+	// 核心数据。存储从请求中提取的原始 Bearer Token 字符串（例如那串长长的 JWT 字符）。
+	// 由于是 private final，一旦创建便不可更改。
 	private final String token;
 
 	/**

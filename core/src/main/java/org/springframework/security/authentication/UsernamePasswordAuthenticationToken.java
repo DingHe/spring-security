@@ -34,12 +34,16 @@ import org.springframework.util.Assert;
  * @author Ben Alex
  * @author Norbert Nowak
  */
+// UsernamePasswordAuthenticationToken 是 Spring Security 中最核心、使用频率最高的认证实现类。它专门为传统的“用户名+密码”登录模式设计，承载了从用户提交凭证到系统确认身份的完整数据流。
+// 这个类扮演了 Authentication（认证对象） 的角色，在认证流程中具有双重身份：
+// 认证请求的容器：当用户在表单输入用户名和密码点击登录时，Filter 会创建一个该类的实例（此时标记为“未认证”），里面只装着用户名和密码。
+// 认证成功的证据：一旦 DaoAuthenticationProvider 验证密码正确，它会创建一个新的该类实例（此时标记为“已认证”），里面装着完整的用户信息（UserDetails）和权限列表（Authorities）。
 public class UsernamePasswordAuthenticationToken extends AbstractAuthenticationToken {
 
 	private static final long serialVersionUID = SpringSecurityCoreVersion.SERIAL_VERSION_UID;
-
+	// 主体。在认证前，它通常是用户输入的 String 类型的用户名；认证成功后，它通常是 UserDetails 实现类对象。
 	private final Object principal;
-
+	// 凭证。通常是用户输入的明文密码。为了安全，认证成功后此属性通常会被置为 null。
 	private Object credentials;
 
 	/**

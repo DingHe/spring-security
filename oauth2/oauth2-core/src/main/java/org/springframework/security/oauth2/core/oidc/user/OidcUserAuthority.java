@@ -35,13 +35,20 @@ import org.springframework.util.Assert;
  * @since 5.0
  * @see OidcUser
  */
+// OidcUserAuthority 是 Spring Security OAuth2/OIDC 模块中专为 OpenID Connect (OIDC) 1.0 协议设计的类。
+// 它继承自 OAuth2UserAuthority，是 OIDC 登录场景下表示用户权限和身份信息的标准载体。
+// 在 OIDC 协议中，身份认证的结果不仅仅是一个 Access Token，还包含一个 ID Token（包含用户身份声明的 JWT）。
+// 身份声明的集大成者：它不仅包含普通的 OAuth2 属性，还专门封装了 OidcIdToken（必选）和 OidcUserInfo（可选）。
+// 权限标记：默认赋予用户 OIDC_USER 权限。
+// 声明合并：它通过静态工具方法将来自 ID Token 和 UserInfo 端点的所有声明（Claims）合并到一个统一的 Map 中，方便后续进行权限判定或页面展示。
 public class OidcUserAuthority extends OAuth2UserAuthority {
 
 	@Serial
 	private static final long serialVersionUID = -4675866280835753141L;
-
+	// 核心属性（必填）。
+	// 代表 OIDC 的 ID Token，包含签发者、受众、过期时间以及用户的基本身份信息（如 sub）。
 	private final OidcIdToken idToken;
-
+	// 可选属性。如果客户端调用了 UserInfo 端点，则该属性包含更详细的用户资料（如姓名、地址、电话等）。
 	private final OidcUserInfo userInfo;
 
 	/**

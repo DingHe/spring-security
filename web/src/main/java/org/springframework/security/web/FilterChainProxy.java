@@ -141,25 +141,37 @@ import org.springframework.web.filter.GenericFilterBean;
  * @author Luke Taylor
  * @author Rob Winch
  */
+// FilterChainProxy 是 Spring Security 的核心枢纽。它本质上是一个特殊的 Servlet Filter，负责将请求分发给一组由 Spring 管理的 Security Filter Chains。
+// FilterChainProxy 是 Spring Security 过滤机制的入口点。
+// 桥接作用：它作为 Web 容器（如 Tomcat）和 Spring 应用上下文之间的桥梁。通常由 DelegatingFilterProxy 拦截请求并转发给它。
+// 路由分发：它持有一个 SecurityFilterChain 列表。当请求到达时，它会遍历这些链，通过 RequestMatcher 匹配当前请求，并决定使用哪一组过滤器。
+// 安全防护（Firewall）：在执行任何安全过滤之前，它通过 HttpFirewall 对请求进行校验，防止常见的 Web 攻击（如 HTTP 响应拆分、路径穿越等）。
+// 清理上下文：负责在请求结束后清理 SecurityContext，防止线程重用导致的信息泄露。
 public class FilterChainProxy extends GenericFilterBean {
 
 	private static final Log logger = LogFactory.getLog(FilterChainProxy.class);
-
+	// 用于在 ServletRequest 中设置属性标签，确保 FilterChainProxy 在同一次请求中只执行一次（防止重复过滤）。
 	private static final String FILTER_APPLIED = FilterChainProxy.class.getName().concat(".APPLIED");
-
+	// 定义如何存储和访问 SecurityContext。
+	// 默认使用全局的 SecurityContextHolder 策略。
 	private SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder
 		.getContextHolderStrategy();
-
+	// 核心属性。
+	// 包含应用中定义的所有安全过滤链。每个链包含匹配规则和对应的过滤器列表。
 	private List<SecurityFilterChain> filterChains;
-
+	// 校验器。在应用启动时检查配置的过滤器链是否合法（默认实现为空）。
 	private FilterChainValidator filterChainValidator = new NullFilterChainValidator();
-
+	// 防火墙。默认为 StrictHttpFirewall。
+	// 用于包装原始请求/响应，过滤恶意字符或格式异常的请求。
 	private HttpFirewall firewall = new StrictHttpFirewall();
-
+	// 处理器。
+	// 当防火墙拒绝一个请求时，由它决定返回什么响应（默认返回 403 或相关错误码）。
 	private RequestRejectedHandler requestRejectedHandler = new HttpStatusRequestRejectedHandler();
-
+	// 异常分析工具。
+	// 用于从异常链中提取特定的异常（如防火墙抛出的异常）。
 	private ThrowableAnalyzer throwableAnalyzer = new ThrowableAnalyzer();
-
+	// 过滤器链装饰器（Spring Security 6.0 引入）。
+	// 负责将安全过滤器列表封装成一个可执行的 FilterChain。
 	private FilterChainDecorator filterChainDecorator = new VirtualFilterChainDecorator();
 
 	public FilterChainProxy() {
@@ -172,15 +184,17 @@ public class FilterChainProxy extends GenericFilterBean {
 	public FilterChainProxy(List<SecurityFilterChain> filterChains) {
 		this.filterChains = filterChains;
 	}
-
+	// 在 Bean 属性设置完成后执行。调用 filterChainValidator 来验证配置是否正确。
 	@Override
 	public void afterPropertiesSet() {
 		this.filterChainValidator.validate(this);
 	}
-
+	// 不仅仅是简单地转发请求，还承担了重入控制、异常拦截和资源清理三大职责。
 	@Override
 	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
 			throws IOException, ServletException {
+		// 防止重复过滤 (Re-entry Control)
+		// 确保了 Spring Security 的逻辑在一次请求中只触发一次，避免重复的认证检查或防火墙处理。如果已执行过，则直接跳过后续的清理逻辑，只执行内部过滤。
 		boolean clearContext = request.getAttribute(FILTER_APPLIED) == null;
 		if (!clearContext) {
 			doFilterInternal(request, response, chain);
@@ -205,30 +219,43 @@ public class FilterChainProxy extends GenericFilterBean {
 			request.removeAttribute(FILTER_APPLIED);
 		}
 	}
-
+	// 核心调度逻辑。
+	// 如果说 doFilter 是外部的防护壳，那么 doFilterInternal 就是内部的指挥官，负责决定请求应该经过哪些安全过滤器。
 	private void doFilterInternal(ServletRequest request, ServletResponse response, FilterChain chain)
 			throws IOException, ServletException {
+		// 调用 HttpFirewall 将原始请求和响应包装成 FirewalledRequest 和 FirewalledResponse。
+		// 规范化 URL：防止路径穿越攻击（如 /a/../b 变成 /b）。
+		// 安全性校验：拦截包含非法字符（如换行符、分号、控制字符）的恶意请求。
+		// 一致性：确保后续匹配路径时，无论容器（Tomcat, Jetty）如何解析，Spring Security 看到的路径是一致的。
 		FirewalledRequest firewallRequest = this.firewall.getFirewalledRequest((HttpServletRequest) request);
 		HttpServletResponse firewallResponse = this.firewall.getFirewalledResponse((HttpServletResponse) response);
+		// 获取匹配的过滤器列表 (Path Matching)
+		// 根据当前请求的 URL、方法（GET/POST）等信息，找到第一个匹配的 SecurityFilterChain，并提取其中的所有 Filter。
 		List<Filter> filters = getFilters(firewallRequest);
+		// 情况 A：没有匹配的安全过滤器
 		if (filters == null || filters.isEmpty()) {
 			if (logger.isTraceEnabled()) {
 				logger.trace(LogMessage.of(() -> "No security for " + requestLine(firewallRequest)));
 			}
+			// 非常重要。防火墙在包装请求时可能会修改（规范化）路径，在离开 Spring Security 作用域进入业务代码前，必须恢复原始请求的状态，以免影响后续 Servlet 的路径映射。
 			firewallRequest.reset();
+			// 直接跳过安全过滤，执行容器原本的过滤器链（originalChain）。
 			this.filterChainDecorator.decorate(chain).doFilter(firewallRequest, firewallResponse);
 			return;
 		}
 		if (logger.isDebugEnabled()) {
 			logger.debug(LogMessage.of(() -> "Securing " + requestLine(firewallRequest)));
 		}
+		// 情况 B：执行安全过滤链
+		// 定义了当所有安全过滤器都执行完毕（且没有被拦截）后，程序应该做什么。
+		// 确保在执行具体的业务逻辑（如 Controller）之前，先重置防火墙状态，然后把控制权交回给 Servlet 容器的原始 chain。
 		FilterChain reset = (req, res) -> {
 			if (logger.isDebugEnabled()) {
 				logger.debug(LogMessage.of(() -> "Secured " + requestLine(firewallRequest)));
 			}
 			// Deactivate path stripping as we exit the security filter chain
-			firewallRequest.reset();
-			chain.doFilter(req, res);
+			firewallRequest.reset(); // 离开安全过滤链时重置请求
+			chain.doFilter(req, res); // 执行原始的 Servlet 过滤器链
 		};
 		this.filterChainDecorator.decorate(reset, filters).doFilter(firewallRequest, firewallResponse);
 	}
@@ -238,6 +265,7 @@ public class FilterChainProxy extends GenericFilterBean {
 	 * @param request the request to match
 	 * @return an ordered array of Filters defining the filter chain
 	 */
+	// 在众多的安全配置中，找到最适合当前请求的那一个。
 	private List<Filter> getFilters(HttpServletRequest request) {
 		int count = 0;
 		for (SecurityFilterChain chain : this.filterChains) {
@@ -245,6 +273,9 @@ public class FilterChainProxy extends GenericFilterBean {
 				logger.trace(LogMessage.format("Trying to match request against %s (%d/%d)", chain, ++count,
 						this.filterChains.size()));
 			}
+			// 匹配判定 (chain.matches)：每个 SecurityFilterChain 内部都有一个 RequestMatcher。它会检查当前请求的 URL 路径、HTTP 方法（GET/POST/等）、甚至是 Header 或 IP 地址 是否符合该链的定义。
+			// 短路返回 (Short-circuit)：一旦发现第一个匹配的过滤链，方法立即返回该链包含的过滤器列表（List<Filter>），不再继续向下匹配。
+			// 这就是为什么在 Spring Security 配置中，必须将“更具体的路径”（如 /api/admin/**）放在“更通用的路径”（如 /**）之前的原因。
 			if (chain.matches(request)) {
 				return chain.getFilters();
 			}
@@ -343,14 +374,18 @@ public class FilterChainProxy extends GenericFilterBean {
 	 * Internal {@code FilterChain} implementation that is used to pass a request through
 	 * the additional internal list of filters which match the request.
 	 */
+	// 在标准的 Servlet 容器（如 Tomcat）中，一个请求通常只对应一个过滤器映射。但 Spring Security 需要按顺序执行几十个安全过滤器（认证、授权、CSRF 防护等）。
+	// 虚拟化编排：它模拟了 Servlet 容器的 FilterChain 行为，在一个逻辑链条中串联起所有的 additionalFilters（安全过滤器）。
+	// 桥接业务逻辑：它充当了“先锋队”，确保所有安全检查全部通过后，才将控制权交给 originalChain（即真正的业务逻辑或 Spring MVC 的 DispatcherServlet）。
+	// 状态追踪：它内部维护了一个指针，记录当前执行到了第几个过滤器，确保每个过滤器都能正确地通过 chain.doFilter() 触发下一个。
 	private static final class VirtualFilterChain implements FilterChain {
-
+		// 原始链。指向 Servlet 容器原生的过滤器链。它是安全检查结束后的终点。
 		private final FilterChain originalChain;
-
+		// 安全过滤器列表。存储了当前请求匹配到的所有 Spring Security 内部过滤器。
 		private final List<Filter> additionalFilters;
-
+		// 安全过滤器的总数量。用于判断何时结束安全检查。
 		private final int size;
-
+		// 游标/指针。记录当前正在执行第几个过滤器，初始值为 0。
 		private int currentPosition = 0;
 
 		private VirtualFilterChain(FilterChain chain, List<Filter> additionalFilters) {
@@ -397,6 +432,10 @@ public class FilterChainProxy extends GenericFilterBean {
 	 * @author Josh Cummings
 	 * @since 6.0
 	 */
+	// 主要用于定义如何将 Spring Security 的过滤器（Security Filters）与 Servlet 容器原始的过滤器链（Original FilterChain）混合编排。
+	// 在 Spring Security 的传统实现中，安全过滤器通常被封装在 VirtualFilterChain 中执行。但在某些复杂的 Web 架构中，我们需要更灵活地控制“安全滤网”是如何套在“原始请求”上的。
+	// 装饰者模式的应用：它的核心作用是装饰（Decorate）。它接收原始的 FilterChain，并将 Spring Security 的一组 Filter 注入其中，返回一个新的、具备安全能力的过滤器链。
+	// 架构解耦：它允许 Spring Security 在不同的 Web 容器或环境下，以不同的方式组装过滤器链。
 	public interface FilterChainDecorator {
 
 		/**
@@ -405,6 +444,7 @@ public class FilterChainProxy extends GenericFilterBean {
 		 * @param original the original {@link FilterChain}
 		 * @return a security-enabled {@link FilterChain}
 		 */
+		// 提供一个没有任何安全过滤器、但仍需考虑安全因素的装饰链。
 		default FilterChain decorate(FilterChain original) {
 			return decorate(original, Collections.emptyList());
 		}
@@ -417,6 +457,7 @@ public class FilterChainProxy extends GenericFilterBean {
 		 * @return a security-enabled {@link FilterChain} that includes the provided
 		 * filters
 		 */
+		// 核心装饰方法，将指定的安全过滤器注入到原始链中。
 		FilterChain decorate(FilterChain original, List<Filter> filters);
 
 	}
@@ -427,6 +468,10 @@ public class FilterChainProxy extends GenericFilterBean {
 	 * @author Josh Cummings
 	 * @since 6.0
 	 */
+	// 主要职责是利用经典的 VirtualFilterChain 机制，将安全过滤器挂载到原始的请求处理链上。
+	// 实现“虚拟”链逻辑：在 Servlet 规范中，FilterChain 通常由容器（如 Tomcat）维护。为了在不改变容器配置的情况下插入几十个安全过滤器，Spring Security 创建了一个“虚拟”的内部链。
+	// 桥接作用：它充当了工厂的角色。它接收原始的 Servlet FilterChain，并根据传入的 filters 列表，生产出一个 VirtualFilterChain 实例。
+	// 默认降级方案：当没有任何安全过滤器（filters 为空）时，它非常聪明地选择“不作为”，直接返回原始链，从而保证了性能。
 	public static final class VirtualFilterChainDecorator implements FilterChainDecorator {
 
 		/**

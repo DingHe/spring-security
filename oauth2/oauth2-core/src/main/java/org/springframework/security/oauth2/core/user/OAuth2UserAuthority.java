@@ -34,14 +34,21 @@ import org.springframework.util.Assert;
  * @since 5.0
  * @see OAuth2User
  */
+// 不仅实现了普通的权限接口，还专门为 OAuth 2.0 登录场景 设计，用于承载第三方平台（如 GitHub、Google）返回的用户详细属性。
+// 在 OAuth2 登录流程中，当客户端从授权服务器获取 Access Token 后，会进一步调用 UserInfo Endpoint 获取用户信息。
+// 属性持有者：它不仅代表一个权限（Authority），还持有一个 Map，存储了从 UserInfo 接口获取的原始属性（如 email, sub, picture 等）。
+// 身份关联：它是 OAuth2User 的组成部分。通过它，Spring Security 可以在授权决策时，既参考用户的权限字符串，也能访问用户的详细 profile 信息。
+// 灵活建模：相比于普通的 SimpleGrantedAuthority（只有一个字符串），它允许开发者在授权逻辑中利用复杂的第三方用户信息。
 public class OAuth2UserAuthority implements GrantedAuthority {
 
 	private static final long serialVersionUID = SpringSecurityCoreVersion.SERIAL_VERSION_UID;
-
+	// 权限标识符。默认为 "OAUTH2_USER"。
+	// 它是用于 Spring Security 权限检查（如 hasAuthority）的字符串。
 	private final String authority;
-
+	// 用户属性集。存储从授权服务器返回的键值对。
+	// 它是不可变的（Unmodifiable），保证了数据安全性。
 	private final Map<String, Object> attributes;
-
+	// 主键属性名。标识 attributes 映射中哪个键（Key）代表用户的“唯一标识”或“登录名”（例如 sub 或 id）。
 	private final String userNameAttributeName;
 
 	/**

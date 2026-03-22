@@ -28,6 +28,11 @@ import jakarta.servlet.http.HttpServletRequest;
  * @author Eddú Meléndez
  * @since 3.0.2
  */
+// 决定了安全策略如何精准地“瞄准” HTTP 请求。
+// RequestMatcher 是一个匹配策略接口，其核心任务是判断一个给定的 HttpServletRequest 是否符合预设的规则。
+// 流量分流：它被 FilterChainProxy 用来决定当前的请求应该进入哪一个 SecurityFilterChain（过滤器链）。
+// 权限细化：在授权配置中（如 authorizeHttpRequests），它定义了哪些路径需要认证，哪些路径可以匿名访问。
+// 属性提取：除了简单的“是/否”判断，它还能从 URL 路径中提取变量（类似 Spring MVC 的 @PathVariable），供后续逻辑使用。
 @FunctionalInterface
 public interface RequestMatcher {
 
@@ -36,6 +41,8 @@ public interface RequestMatcher {
 	 * @param request the request to check for a match
 	 * @return true if the request matches, false otherwise
 	 */
+	// 决定实现的策略规则是否匹配提供的请求。
+	// 最基础的方法。比如 AntPathRequestMatcher 会检查 URL 是否符合 /api/**；HttpMethodRequestMatcher 会检查是否为 POST 请求。
 	boolean matches(HttpServletRequest request);
 
 	/**
@@ -45,6 +52,7 @@ public interface RequestMatcher {
 	 * HttpServletRequest
 	 * @since 5.2
 	 */
+	// 获取更详细的匹配结果（MatchResult）。
 	default MatchResult matcher(HttpServletRequest request) {
 		boolean match = matches(request);
 		return new MatchResult(match, Collections.emptyMap());

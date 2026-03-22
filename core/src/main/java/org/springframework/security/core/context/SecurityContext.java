@@ -30,6 +30,10 @@ import org.springframework.security.core.Authentication;
  *
  * @author Ben Alex
  */
+// SecurityContext 的主要作用是存储和获取当前执行线程的安全细节。
+// 关联当前线程：在典型的 Servlet 应用中，每个请求由一个线程处理。Spring Security 会将 SecurityContext 与当前线程绑定。
+// 持有认证主体：它是 Authentication 对象的直接容器。无论是在 Controller、Service 还是工具类中，只要你能访问到这个上下文，你就能知道“当前是谁在访问系统”。
+// 解耦业务与安全：业务代码不需要关注登录信息是从 Session、JWT 还是 OAuth2 来的，只需要从 SecurityContext 中“取”出 Authentication 即可。
 public interface SecurityContext extends Serializable {
 
 	/**
@@ -37,6 +41,7 @@ public interface SecurityContext extends Serializable {
 	 * @return the <code>Authentication</code> or <code>null</code> if no authentication
 	 * information is available
 	 */
+	// 获取当前认证通过的主体（Principal）或认证请求令牌（Token）。
 	Authentication getAuthentication();
 
 	/**
@@ -45,6 +50,7 @@ public interface SecurityContext extends Serializable {
 	 * @param authentication the new <code>Authentication</code> token, or
 	 * <code>null</code> if no further authentication information should be stored
 	 */
+	// 更改当前认证的主体信息，或清除认证信息。
 	void setAuthentication(Authentication authentication);
 
 }

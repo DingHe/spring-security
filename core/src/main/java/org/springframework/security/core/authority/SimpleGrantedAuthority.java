@@ -29,10 +29,15 @@ import org.springframework.util.Assert;
  *
  * @author Luke Taylor
  */
+// SimpleGrantedAuthority 是 Spring Security 中最常用、最基础的权限实现类。它通过一个简单的字符串来表达用户的权限或角色。
+// 权限原子化：它将复杂的权限逻辑简化为一个“字符串标签”。
+// 通用性：它是 Spring Security 默认使用的权限载体。无论是从数据库加载的用户角色（如 ROLE_ADMIN），还是从 JWT 解析出的权限（如 READ_PRIVILEGE），通常都会被封装成 SimpleGrantedAuthority 对象。
+// 不可变性：该类被设计为 final 且属性不可变，确保了权限信息在多线程环境（如并发请求处理）下的安全性。
 public final class SimpleGrantedAuthority implements GrantedAuthority {
 
 	private static final long serialVersionUID = SpringSecurityCoreVersion.SERIAL_VERSION_UID;
-
+	// 核心属性。
+	// 存储权限的文本表示。虽然变量名叫做 role，但它既可以表示角色（如 ROLE_USER），也可以表示具体权限（如 FILE_WRITE）。
 	private final String role;
 
 	public SimpleGrantedAuthority(String role) {

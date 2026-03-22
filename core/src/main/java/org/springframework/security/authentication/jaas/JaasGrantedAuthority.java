@@ -29,12 +29,18 @@ import org.springframework.util.Assert;
  * @author Ray Krueger
  * @see AuthorityGranter
  */
+// JaasGrantedAuthority 是 Spring Security 为集成 JAAS (Java Authentication and Authorization Service) 专门设计的一个权限类。
+// 它属于 GrantedAuthority 的一种特殊实现。
+// 在标准的 Java 安全体系中，JAAS 认证通过后会产生一个 Subject，其中包含多个 Principal（身份主体）。
+// 关联起因：Spring Security 使用 AuthorityGranter 接口将 JAAS 的 Principal 转换为 Spring Security 的 GrantedAuthority（权限）。
+// 持有“授信证据”：与普通的 SimpleGrantedAuthority 不同，JaasGrantedAuthority 不仅保存了权限字符串（如 ROLE_ADMIN），还保存了导致该权限被授予的那个 Principal 对象。
+// 可追溯性：它让开发者能够知道：“这个用户之所以拥有这个角色，是因为他在 JAAS 中拥有这个特定的身份标识”。
 public final class JaasGrantedAuthority implements GrantedAuthority {
 
 	private static final long serialVersionUID = SpringSecurityCoreVersion.SERIAL_VERSION_UID;
-
+	// 权限名/角色名。这是 Spring Security 进行授权检查（如 hasRole）时使用的字符串标识。
 	private final String role;
-
+	// 关联主体。这是触发该权限生成的 JAAS 原始 Principal 对象。它是“为什么授予这个权限”的证据。
 	private final Principal principal;
 
 	public JaasGrantedAuthority(String role, Principal principal) {

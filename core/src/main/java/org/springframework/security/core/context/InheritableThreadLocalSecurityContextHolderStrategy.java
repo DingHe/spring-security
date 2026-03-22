@@ -28,6 +28,11 @@ import org.springframework.util.Assert;
  * @author Rob Winch
  * @see java.lang.ThreadLocal
  */
+// 核心在于利用了 Java 的 InheritableThreadLocal 类，解决了多线程异步调用中的身份传递问题。
+// 在默认的 ThreadLocal 策略下，安全上下文仅在当前线程可见。如果你在主线程中开启了一个子线程（例如使用 new Thread()），子线程是无法获取父线程中的登录信息的。
+// 身份继承：该类允许子线程自动继承父线程的安全上下文。当主线程创建子线程时，InheritableThreadLocal 会将主线程的值拷贝一份给子线程。
+// 适用场景：适用于简单的异步处理逻辑，即父线程产生的任务需要保留父线程的用户身份。
+// 风险提示：在线程池（如 Spring 的 @Async 默认配置）中使用时需要极其小心。因为线程池中的线程是复用的，如果清除逻辑不当，可能会导致旧的身份信息在线程回收后污染下一个任务。
 final class InheritableThreadLocalSecurityContextHolderStrategy implements SecurityContextHolderStrategy {
 
 	private static final ThreadLocal<Supplier<SecurityContext>> contextHolder = new InheritableThreadLocal<>();

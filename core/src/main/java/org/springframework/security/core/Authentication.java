@@ -50,6 +50,12 @@ import org.springframework.security.core.context.SecurityContextHolder;
  *
  * @author Ben Alex
  */
+// Authentication 接口是整个安全框架的核心数据模型。它不仅代表了“登录用户”的身份，还贯穿了从“发起登录请求”到“完成授权校验”的全生命周期。
+// Authentication 主要承担以下三个核心角色：
+// 认证请求的载体 (Token)：当用户尝试登录时，系统会将用户提交的凭证（如用户名/密码）封装进一个 Authentication 实现类中（如 UsernamePasswordAuthenticationToken），交给 AuthenticationManager 进行校验。
+// 已认证实体的代表：一旦认证成功，AuthenticationManager 会返回一个包含用户详细信息、权限列表且标记为“已认证”的 Authentication 对象。
+// 安全上下文的核心：认证后的对象会被存入 SecurityContextHolder。后续系统在进行权限检查（授权）时，会从这里调取用户的权限列表。
+// 它继承了 Principal（代表身份主体）和 Serializable（支持序列化，方便存入 Redis 等 Session 存储）。
 public interface Authentication extends Principal, Serializable {
 
 	/**
@@ -64,6 +70,8 @@ public interface Authentication extends Principal, Serializable {
 	 * @return the authorities granted to the principal, or an empty collection if the
 	 * token has not been authenticated. Never null.
 	 */
+	// 获取当前用户被授予的权限集合。
+	// 返回一个 GrantedAuthority 的集合。这些权限通常以 ROLE_USER、ROLE_ADMIN 或具体的权限字符串（如 READ_PRIVILEGE）形式存在。
 	Collection<? extends GrantedAuthority> getAuthorities();
 
 	/**
@@ -72,6 +80,9 @@ public interface Authentication extends Principal, Serializable {
 	 * are expected to populate the credentials.
 	 * @return the credentials that prove the identity of the <code>Principal</code>
 	 */
+	// 获取证明身份正确的凭证。
+	// 通常是指密码。但在不同的认证方式中，它可能是证书、指纹信息或验证码。
+	// 为了安全起见，许多实现类会在认证完成后通过 CredentialsContainer.eraseCredentials() 方法将此处的密码擦除，以防内存泄露导致密码被窃取。
 	Object getCredentials();
 
 	/**
@@ -80,6 +91,8 @@ public interface Authentication extends Principal, Serializable {
 	 * @return additional details about the authentication request, or <code>null</code>
 	 * if not used
 	 */
+	// 获取关于认证请求的额外细节。
+	// 这些信息不属于核心身份凭证，但对安全审计很有用。常见的内容包括：用户的 IP 地址、Session ID、或者是证书序列号。
 	Object getDetails();
 
 	/**
@@ -94,6 +107,9 @@ public interface Authentication extends Principal, Serializable {
 	 * @return the <code>Principal</code> being authenticated or the authenticated
 	 * principal after authentication.
 	 */
+	// 获取被认证的主体身份。
+	// 认证前：通常是用户输入的“用户名”。
+	// 认证后：通常是一个更丰富的对象，如 Spring Security 提供的 UserDetails 实例，其中包含用户名、账号是否锁定、密码过期等详细状态。
 	Object getPrincipal();
 
 	/**
@@ -114,6 +130,9 @@ public interface Authentication extends Principal, Serializable {
 	 * <code>AbstractSecurityInterceptor</code> does not need to present the token to the
 	 * <code>AuthenticationManager</code> again for re-authentication.
 	 */
+	// 判断该 Token 是否已经过认证。
+	// 返回 false：表示这还只是一个认证请求，或者是一个匿名的访问请求，安全拦截器需要将其交给 AuthenticationManager 处理。
+	// 返回 true：表示该对象已经过信任的认证机构验证，不需要再次认证，可以直接用于后续的授权检查。
 	boolean isAuthenticated();
 
 	/**
@@ -132,6 +151,8 @@ public interface Authentication extends Principal, Serializable {
 	 * implementation being immutable or implementing its own alternative approach to
 	 * {@link #isAuthenticated()}
 	 */
+	// 手动设置认证状态。
+	// 设为 false：这是最常见的用法，用于使当前的认证信息失效。
 	void setAuthenticated(boolean isAuthenticated) throws IllegalArgumentException;
 
 }

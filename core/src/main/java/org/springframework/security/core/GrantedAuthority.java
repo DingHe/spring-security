@@ -29,6 +29,11 @@ import org.springframework.security.authorization.AuthorizationManager;
  *
  * @author Ben Alex
  */
+// GrantedAuthority（授予的权限）是**授权（Authorization）**模型的基础单元。如果说 Authentication 解决了“你是谁”的问题，那么 GrantedAuthority 解决的就是“你能做什么”的问题。
+// GrantedAuthority 表示授予给认证主体（Principal）的一种“权力”或“许可”。
+// 权限的抽象：它是一个极其简化的接口，将复杂的权限逻辑抽象为一个简单的字符串标识。
+// 解耦认证与授权：通过这个接口，Spring Security 可以将用户的身份（User）与其拥有的权限（Authorities）关联起来。
+// 决策依据：在请求资源（如访问某个 URL 或调用某个方法）时，AuthorizationManager（授权管理器）会检查当前用户的 Authentication 对象中是否包含匹配的 GrantedAuthority。
 public interface GrantedAuthority extends Serializable {
 
 	/**
@@ -46,6 +51,8 @@ public interface GrantedAuthority extends Serializable {
 	 * granted authority cannot be expressed as a <code>String</code> with sufficient
 	 * precision).
 	 */
+	// 获取该权限的字符串表示形式。
+	// 作为标识符：该方法返回一个字符串（如 ROLE_ADMIN、READ_PRIVILEGE）。这个字符串是授权决策的核心依据。
 	String getAuthority();
 
 }

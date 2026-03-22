@@ -30,15 +30,21 @@ import org.springframework.util.Assert;
  *
  * @author Filip Hanik
  */
+// LdapAuthority 是一个专门为 LDAP（轻量级目录访问协议） 认证场景设计的权限类。
+// 它不仅包含基本的权限字符串，还保留了 LDAP 条目的元数据。
+// 当使用 LDAP 进行认证和授权时，权限（Authorities）通常映射自 LDAP 中的组（Groups）或特定属性。
+// 身份与路径绑定：普通的权限类只保存一个名字（如 ROLE_ADMIN），但 LdapAuthority 还保存了该权限在 LDAP 目录中的 DN（Distinguished Name，区分名称）。这对于需要知道权限来源路径的场景非常有用。
+// 属性携带者：除了角色名，它还可以携带从 LDAP 条目中抓取的额外属性（如 mail、uid、memberOf 等）。
+// 丰富的上下文：它让开发者在进行授权决策时，不仅能看到“用户有什么角色”，还能看到该角色在 LDAP 树中的位置以及相关的条目详情。
 public class LdapAuthority implements GrantedAuthority {
 
 	@Serial
 	private static final long serialVersionUID = 343193700821611354L;
-
+	// 区分名称。表示该权限条目在 LDAP 树中的完整路径（例如：cn=managers,ou=groups,dc=example,dc=com）。
 	private final String dn;
-
+	// 角色名称。即 Spring Security 最终用于匹配的权限字符串（例如：ROLE_ADMIN）。
 	private final String role;
-
+	// LDAP 属性集。一个键值对集合，存储了该 LDAP 条目的其他属性。由于 LDAP 属性可以是多值的，所以 Value 使用了 List<String>。
 	private final Map<String, List<String>> attributes;
 
 	/**
