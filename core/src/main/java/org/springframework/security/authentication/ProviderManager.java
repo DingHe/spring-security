@@ -87,18 +87,26 @@ import org.springframework.util.CollectionUtils;
  * @author Luke Taylor
  * @see DefaultAuthenticationEventPublisher
  */
+// ProviderManager 是 Spring Security 中 AuthenticationManager 最常用的实现类。
+// 如果说 AuthenticationManager 是认证的总入口，那么 ProviderManager 就是真正的执行调度中心。
+// 它的设计理念是**“职责链模式（Chain of Responsibility）”**。
+// 组合多个插件：它内部维护了一个 AuthenticationProvider 列表。
+// 每个 Provider 负责一种认证方式（如：一个查数据库，一个查 LDAP，一个处理短信验证码）。
+// 轮询匹配：当一个认证请求进来时，它会逐个询问这些 Provider：“你能处理这个凭证吗？”。如果能，就让该 Provider 尝试认证。
+// 父级回退机制：它支持嵌套，如果当前 ProviderManager 所有的 Provider 都无法处理，它可以将请求转发给一个 Parent（父级管理器）。
+// 安全清理：认证成功后，它负责擦除敏感信息（如明文密码），防止泄露。
 public class ProviderManager implements AuthenticationManager, MessageSourceAware, InitializingBean {
 
 	private static final Log logger = LogFactory.getLog(ProviderManager.class);
-
+	// 事件发布器。负责在认证成功或失败时对外广播事件（如发送登录日志）。默认是一个空实现 NullEventPublisher。
 	private AuthenticationEventPublisher eventPublisher = new NullEventPublisher();
-
+	// 核心列表。存储了所有注册的认证执行者（如 DaoAuthenticationProvider）。
 	private List<AuthenticationProvider> providers = Collections.emptyList();
-
+	// 用于获取国际化（I18N）的错误消息。
 	protected MessageSourceAccessor messages = SpringSecurityMessageSource.getAccessor();
-
+	// 父级管理器。通常用于实现权限的分级管理，如果本地 Providers 都没匹配上，则求助于 Parent。
 	private AuthenticationManager parent;
-
+	// 凭证擦除开关。默认为 true。认证成功后，会把 Authentication 对象里的密码设为 null 以保安全。
 	private boolean eraseCredentialsAfterAuthentication = true;
 
 	/**
@@ -161,6 +169,10 @@ public class ProviderManager implements AuthenticationManager, MessageSourceAwar
 	 * @return a fully authenticated object including credentials.
 	 * @throws AuthenticationException if authentication fails.
 	 */
+	// ProviderManager 的 authenticate 方法是 Spring Security 认证流程中最能体现“设计模式”精髓的地方。
+	// 它通过对一组 AuthenticationProvider 进行链式调度，实现了对多种登录方式的兼容。
+	// 寻找最合适的认证执行者并获取最终的身份证明。
+	// 它不仅仅是简单的循环。它有一套精密的**短路（Short-circuit）和回退（Fallback）**机制。
 	@Override
 	public Authentication authenticate(Authentication authentication) throws AuthenticationException {
 		Class<? extends Authentication> toTest = authentication.getClass();
@@ -171,6 +183,7 @@ public class ProviderManager implements AuthenticationManager, MessageSourceAwar
 		int currentPosition = 0;
 		int size = this.providers.size();
 		for (AuthenticationProvider provider : getProviders()) {
+			// 类型匹配 (supports)：首先判断 Provider 是否支持当前的 Token 类型（如 UsernamePasswordAuthenticationToken）。不支持则直接跳过。
 			if (!provider.supports(toTest)) {
 				continue;
 			}
@@ -179,12 +192,17 @@ public class ProviderManager implements AuthenticationManager, MessageSourceAwar
 						provider.getClass().getSimpleName(), ++currentPosition, size));
 			}
 			try {
+				// 尝试认证
 				result = provider.authenticate(authentication);
 				if (result != null) {
+					// 成功（非空）：调用 copyDetails 复制请求元数据，并执行 break 跳出循环。
+					// 一旦有一个 Provider 成功，后续所有 Provider 都不再尝试。
 					copyDetails(authentication, result);
 					break;
 				}
 			}
+			// 账户异常/服务内部异常：抛出 AccountStatusException 或 InternalAuthenticationServiceException。
+			// 此时会立即中断整个流程并直接向上抛出异常。这是为了防止在账户已被锁定的情况下，仍然去尝试其他认证方式，从而导致安全隐患。
 			catch (AccountStatusException ex) {
 				prepareException(ex, authentication);
 				logger.debug(LogMessage.format("Authentication failed for user '%s' since their account status is %s",
@@ -208,6 +226,8 @@ public class ProviderManager implements AuthenticationManager, MessageSourceAwar
 				lastException = ex;
 			}
 		}
+		// 第二阶段：父级回退 (Parent Fallback)
+		// 如果本地的所有 Provider 都没能给出成功的结果（返回 null 或抛出异常），代码会检查是否存在 parent 管理器。
 		if (result == null && this.parent != null) {
 			// Allow the parent to try.
 			try {
@@ -225,6 +245,7 @@ public class ProviderManager implements AuthenticationManager, MessageSourceAwar
 				lastException = ex;
 			}
 		}
+		// 第三阶段：凭证擦除 (Security Cleanup)
 		if (result != null) {
 			if (this.eraseCredentialsAfterAuthentication && (result instanceof CredentialsContainer)) {
 				// Authentication is complete. Remove credentials and other secret data

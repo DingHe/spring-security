@@ -113,46 +113,58 @@ import org.springframework.web.filter.GenericFilterBean;
  * @author Ben Alex
  * @author Luke Taylor
  */
+// AbstractAuthenticationProcessingFilter 是 Spring Security 中处理 基于浏览器的 HTTP 认证请求 的核心基类。
+// 它是所有登录过滤器（如著名的 UsernamePasswordAuthenticationFilter）的灵魂，定义了整个认证生命周期的标准工作流。
+// 该类的核心职责是拦截特定的认证请求并协调各组件完成登录流程。
+// 其工作流程遵循以下标准模板：
+// 判断：当前的请求是否是登录请求（匹配 URL 和方法）？
+// 提取：从请求中提取凭证（如用户名/密码、验证码）。
+// 认证：调用 AuthenticationManager 进行校验。
+// 成功处理：保存身份到 SecurityContext，处理 Session 策略，重定向到目标页。
+// 失败处理：清理上下文，通过 FailureHandler 反馈错误。
 public abstract class AbstractAuthenticationProcessingFilter extends GenericFilterBean
 		implements ApplicationEventPublisherAware, MessageSourceAware {
-
+	// 存储策略，决定认证成功后的身份信息如何与线程绑定（默认 ThreadLocal）。
 	private SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder
 		.getContextHolderStrategy();
-
+	// Spring 事件发布器，登录成功后发布 InteractiveAuthenticationSuccessEvent。
 	protected ApplicationEventPublisher eventPublisher;
-
+	// 用于构建请求详情（如远端 IP、Session ID），并注入到 Authentication 对象中。
 	protected AuthenticationDetailsSource<HttpServletRequest, ?> authenticationDetailsSource = new WebAuthenticationDetailsSource();
-
+	// 关键（5.7+）：将 HTTP 请求转换为 Authentication 对象的策略。如果未配置且未重写 attemptAuthentication，将报错。
 	private AuthenticationConverter authenticationConverter = (request) -> {
 		throw new AuthenticationCredentialsNotFoundException(
 				"Please either configure an AuthenticationConverter or override attemptAuthentication when extending AbstractAuthenticationProcessingFilter");
 	};
-
+	// 核心执行者：执行真正的认证逻辑，验证凭证是否正确。
 	private AuthenticationManager authenticationManager;
-
+	// 用于国际化错误消息。
 	protected MessageSourceAccessor messages = SpringSecurityMessageSource.getAccessor();
-
+	// 处理“记住我”功能。
 	private RememberMeServices rememberMeServices = new NullRememberMeServices();
-
+	// 定义哪些请求会被此过滤器拦截（例如 POST /login）。
 	private RequestMatcher requiresAuthenticationRequestMatcher;
-
+	// 成功后是否继续执行后续过滤器链（默认 false，即直接重定向，不执行 Controller）。
 	private boolean continueChainBeforeSuccessfulAuthentication = false;
 
 	private boolean continueChainWhenNoAuthenticationResult;
-
+	// 处理 Session 相关逻辑（如防止 Session 固定攻击、控制最大登录数）
 	private SessionAuthenticationStrategy sessionStrategy = new NullAuthenticatedSessionStrategy();
 
 	private boolean allowSessionCreation = true;
-
+	// 认证成功后的自定义逻辑（如重定向或返回 JSON）。
 	private AuthenticationSuccessHandler successHandler = new SavedRequestAwareAuthenticationSuccessHandler();
-
+	// 认证失败后的自定义逻辑（如重定向回登录页或返回错误 JSON）。
 	private AuthenticationFailureHandler failureHandler = new SimpleUrlAuthenticationFailureHandler();
-
+	// 负责持久化 SecurityContext（如存入 HttpSession）。
 	private SecurityContextRepository securityContextRepository = new RequestAttributeSecurityContextRepository();
 
 	/**
 	 * @param defaultFilterProcessesUrl the default value for <tt>filterProcessesUrl</tt>.
 	 */
+	// 初始化过滤器的拦截路径
+	// 当一个具体的认证过滤器被实例化时，它必须告诉父类：“我负责处理发送到哪个 URL 的请求？”。
+	// 通过传递一个字符串路径，父类会自动将其转换为一个匹配规则，从而开启拦截功能。
 	protected AbstractAuthenticationProcessingFilter(String defaultFilterProcessesUrl) {
 		setFilterProcessesUrl(defaultFilterProcessesUrl);
 	}
@@ -174,6 +186,7 @@ public abstract class AbstractAuthenticationProcessingFilter extends GenericFilt
 	 * @param authenticationManager the {@link AuthenticationManager} used to authenticate
 	 * an {@link Authentication} object. Cannot be null.
 	 */
+	// 要求在实例化时同时明确“拦截哪里”和“由谁认证”。
 	protected AbstractAuthenticationProcessingFilter(String defaultFilterProcessesUrl,
 			AuthenticationManager authenticationManager) {
 		setFilterProcessesUrl(defaultFilterProcessesUrl);
@@ -188,6 +201,7 @@ public abstract class AbstractAuthenticationProcessingFilter extends GenericFilt
 	 * @param authenticationManager the {@link AuthenticationManager} used to authenticate
 	 * an {@link Authentication} object. Cannot be null.
 	 */
+	// 构造函数的作用是 完全自定义过滤器的拦截规则和认证执行者。
 	protected AbstractAuthenticationProcessingFilter(RequestMatcher requiresAuthenticationRequestMatcher,
 			AuthenticationManager authenticationManager) {
 		setRequiresAuthenticationRequestMatcher(requiresAuthenticationRequestMatcher);
@@ -231,11 +245,14 @@ public abstract class AbstractAuthenticationProcessingFilter extends GenericFilt
 
 	private void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
 			throws IOException, ServletException {
+		// 拦截判定 (The Guard)
 		if (!requiresAuthentication(request, response)) {
+			// 动作：如果不匹配（比如配置拦截 /login 但当前请求是 /home），直接调用 chain.doFilter 将请求传给下一个过滤器，并立即返回，不再执行后续认证逻辑。
 			chain.doFilter(request, response);
 			return;
 		}
 		try {
+			// 执行认证 (The Attempt)
 			Authentication authenticationResult = attemptAuthentication(request, response);
 			if (authenticationResult == null) {
 				if (this.continueChainWhenNoAuthenticationResult) {
@@ -274,7 +291,10 @@ public abstract class AbstractAuthenticationProcessingFilter extends GenericFilt
 	 * @return <code>true</code> if the filter should attempt authentication,
 	 * <code>false</code> otherwise.
 	 */
+	// 它的唯一任务是：判定当前请求是否是一个“登录动作”。
+	// 认证过滤器的**“触发开关”**。它在 doFilter 流程的最开始被调用，决定了当前请求是否需要进入昂贵的认证逻辑（如查询数据库、解析 Token）。
 	protected boolean requiresAuthentication(HttpServletRequest request, HttpServletResponse response) {
+		// 执行者：委托给类属性 requiresAuthenticationRequestMatcher
 		if (this.requiresAuthenticationRequestMatcher.matches(request)) {
 			return true;
 		}
@@ -304,6 +324,11 @@ public abstract class AbstractAuthenticationProcessingFilter extends GenericFilt
 	 * @return the authenticated user token, or null if authentication is incomplete.
 	 * @throws AuthenticationException if authentication fails.
 	 */
+	// 负责将原始的 HTTP 请求转化为 Spring Security 能够理解的“身份令牌”，并启动真正的验证过程。
+	// attemptAuthentication 的作用是 “发起认证请求”。
+	// 从 Request 中提取数据（用户名、密码、API Key 等）。
+	// 将数据封装成一个 Authentication 对象。
+	// 委托给 AuthenticationManager 去核实身份。
 	public Authentication attemptAuthentication(HttpServletRequest request, HttpServletResponse response)
 			throws AuthenticationException, IOException, ServletException {
 		Authentication authentication = this.authenticationConverter.convert(request);
@@ -397,7 +422,7 @@ public abstract class AbstractAuthenticationProcessingFilter extends GenericFilt
 	public void setFilterProcessesUrl(String filterProcessesUrl) {
 		setRequiresAuthenticationRequestMatcher(new AntPathRequestMatcher(filterProcessesUrl));
 	}
-
+	// 定义该过滤器“拦截并处理”请求的精确规则
 	public final void setRequiresAuthenticationRequestMatcher(RequestMatcher requestMatcher) {
 		Assert.notNull(requestMatcher, "requestMatcher cannot be null or empty");
 		this.requiresAuthenticationRequestMatcher = requestMatcher;

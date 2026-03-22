@@ -25,6 +25,11 @@ import org.springframework.security.core.AuthenticationException;
  *
  * @author Ben Alex
  */
+// 如果说 ProviderManager 是认证流程的调度员，那么 AuthenticationProvider 就是真正干活的执行者。在 Spring Security 的架构中，它是一个高度可扩展的接口，定义了具体的认证逻辑。
+// AuthenticationProvider 的核心作用是针对特定类型的身份凭证（Token）执行具体的认证逻辑。
+// 垂直分工：不同的实现类处理不同的登录方式。例如 DaoAuthenticationProvider 处理用户名/密码，JwtAuthenticationProvider 处理 JWT 令牌。
+// 解耦认证源：它屏蔽了底层的存储细节。无论用户信息是在数据库、LDAP 还是远程第三方接口，只需实现一个 Provider 即可。
+// 运行时决策：它配合 ProviderManager 工作，通过自荐（supports 方法）的方式决定是否由自己来处理当前的请求。
 public interface AuthenticationProvider {
 
 	/**
@@ -39,6 +44,7 @@ public interface AuthenticationProvider {
 	 * <code>Authentication</code> class will be tried.
 	 * @throws AuthenticationException if authentication fails.
 	 */
+	// 执行实际的身份验证逻辑。
 	Authentication authenticate(Authentication authentication) throws AuthenticationException;
 
 	/**
@@ -60,6 +66,7 @@ public interface AuthenticationProvider {
 	 * @return <code>true</code> if the implementation can more closely evaluate the
 	 * <code>Authentication</code> class presented
 	 */
+	// 告知调度器（ProviderManager）该实现类是否支持处理某种特定类型的 Authentication 对象。
 	boolean supports(Class<?> authentication);
 
 }

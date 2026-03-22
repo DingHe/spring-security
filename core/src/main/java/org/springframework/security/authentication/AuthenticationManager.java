@@ -25,6 +25,10 @@ import org.springframework.security.core.AuthenticationException;
  * @author Ben Alex
  * @author KyeongHoon Lee
  */
+// AuthenticationManager（认证管理器）是一个至关重要的中枢接口。它是连接 Web 安全层与业务认证逻辑的桥梁。
+// 定义标准：它定义了 Spring Security 如何“处理认证请求”。无论你是用用户名密码登录、指纹识别还是 OAuth2，最终都会流向这个接口。
+// 解耦设计：它将“如何提取请求”（Filter 层的工作）与“如何验证身份”（Provider 层的工作）彻底解耦。它不关心认证的细节，只关心结果。
+// 核心实现类：在实际应用中，你遇到最多的实现类是 ProviderManager，它内部维护了一组 AuthenticationProvider 来执行具体的认证逻辑。
 @FunctionalInterface
 public interface AuthenticationManager {
 
@@ -52,6 +56,9 @@ public interface AuthenticationManager {
 	 * @return a fully authenticated object including credentials
 	 * @throws AuthenticationException if authentication fails
 	 */
+	// 这是该接口唯一的方法，虽然简单，但它承载了一套极其严格的“认证契约（Contract）”。
+	// 参数：接收一个 Authentication 对象。这个对象通常是“未认证”的（只有用户名和密码，没有权限列表）。
+	// 返回值：如果认证成功，必须返回一个**完全填充（Fully Populated）**的 Authentication 对象。这个对象应包含：
 	Authentication authenticate(Authentication authentication) throws AuthenticationException;
 
 }
