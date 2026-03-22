@@ -42,6 +42,13 @@ import org.springframework.util.function.SingletonSupplier;
  * @author Ben Alex
  * @author Rob Winch
  */
+// DaoAuthenticationProvider 是 Spring Security 中最常用、最经典的身份认证执行者。
+// 它是 AbstractUserDetailsAuthenticationProvider 的具体实现，专门负责从数据库（或其他持久化存储）中获取用户信息并验证密码。
+// 它的核心作用是**“通过数据访问对象（DAO）进行认证”**。
+// 它将认证逻辑与具体的存储方式解耦：
+// 数据检索：它不直接操作数据库，而是委托给 UserDetailsService 来查找用户。
+// 密码校验：它不直接比对字符串，而是委托给 PasswordEncoder 来处理加密后的密码比对。
+// 安全性增强：它内置了防止**计时攻击（Timing Attack）**的机制，并支持在认证成功后自动升级密码加密强度。
 public class DaoAuthenticationProvider extends AbstractUserDetailsAuthenticationProvider {
 
 	/**
@@ -49,8 +56,9 @@ public class DaoAuthenticationProvider extends AbstractUserDetailsAuthentication
 	 * {@link PasswordEncoder#matches(CharSequence, String)} on when the user is not found
 	 * to avoid SEC-2056.
 	 */
+	// 静态常量。当用户不存在时，用于参与伪装比对的明文密码。
 	private static final String USER_NOT_FOUND_PASSWORD = "userNotFoundPassword";
-
+	// 密码解析器。默认使用委派密码编码器。负责验证用户输入的密码与数据库存储的 Hash 是否匹配。
 	private Supplier<PasswordEncoder> passwordEncoder = SingletonSupplier
 		.of(PasswordEncoderFactories::createDelegatingPasswordEncoder);
 
@@ -60,12 +68,13 @@ public class DaoAuthenticationProvider extends AbstractUserDetailsAuthentication
 	 * {@link PasswordEncoder} implementations will short circuit if the password is not
 	 * in a valid format.
 	 */
+	// 防止计时攻击的关键。存储一个预先加密好的“空用户密码”。
 	private volatile String userNotFoundEncodedPassword;
-
+	// 用户服务。核心依赖，用于根据用户名加载 UserDetails 对象。
 	private UserDetailsService userDetailsService;
-
+	// 密码自动升级服务。可选。如果设置了，当密码加密算法过时，它会自动保存升级后的新 Hash。
 	private UserDetailsPasswordService userDetailsPasswordService;
-
+	// 被泄露密码检查器。Spring Security 6.3 引入，用于检查用户密码是否出现在已知的泄露数据库中。
 	private CompromisedPasswordChecker compromisedPasswordChecker;
 
 	/**

@@ -83,15 +83,22 @@ import org.springframework.web.util.WebUtils;
  * @author Luke Taylor
  * @since 3.0
  */
+// HttpSessionSecurityContextRepository 是 Spring Security 中最核心的持久化实现类。
+// 它利用标准的 Servlet HttpSession 来存储用户的安全上下文（SecurityContext），从而实现在同一个浏览器的多次请求之间保持用户的登录状态。
+// 该类的主要职责是：在 HTTP 会话中管理安全上下文的生命周期。
+// 读取：从当前请求的 HttpSession 中提取 SecurityContext 并交给 Spring Security 框架。
+// 存储：在请求结束或认证成功后，将最新的 SecurityContext 写回 HttpSession。
+// 最小化开销：它包含了一套精密的逻辑，用于避免在不需要时创建 Session（节省服务器内存）。
 public class HttpSessionSecurityContextRepository implements SecurityContextRepository {
 
 	/**
 	 * The default key under which the security context will be stored in the session.
 	 */
+	// 默认 Key。在 Session 中存储上下文的键名，值为 "SPRING_SECURITY_CONTEXT"。
 	public static final String SPRING_SECURITY_CONTEXT_KEY = "SPRING_SECURITY_CONTEXT";
 
 	protected final Log logger = LogFactory.getLog(this.getClass());
-
+	// 策略类。用于定义如何创建空的上下文环境。
 	private SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder
 		.getContextHolderStrategy();
 
@@ -99,14 +106,15 @@ public class HttpSessionSecurityContextRepository implements SecurityContextRepo
 	 * SecurityContext instance used to check for equality with default (unauthenticated)
 	 * content
 	 */
+	// 一个空的 SecurityContext 实例。用于与当前上下文比对，判断内容是否发生了实质性变化。
 	private Object contextObject = this.securityContextHolderStrategy.createEmptyContext();
-
+	// 开关。是否允许在需要存储上下文时自动创建新 Session。默认为 true。
 	private boolean allowSessionCreation = true;
-
+	// 是否禁用 URL 重写（即在 URL 后面拼接 ;jsessionid=...）。默认为 false。
 	private boolean disableUrlRewriting = false;
-
+	// 实际使用的 Key。默认等于 SPRING_SECURITY_CONTEXT_KEY，支持自定义。
 	private String springSecurityContextKey = SPRING_SECURITY_CONTEXT_KEY;
-
+	// 用于判断当前的认证信息是否为“匿名用户”。匿名用户通常不存储到 Session 中。
 	private AuthenticationTrustResolver trustResolver = new AuthenticationTrustResolverImpl();
 
 	/**
@@ -117,19 +125,29 @@ public class HttpSessionSecurityContextRepository implements SecurityContextRepo
 	 * will be generated and returned.
 	 * @deprecated please see {@link SecurityContextRepository#loadContext}
 	 */
+	// 处理请求进入时的核心逻辑。虽然它在较新版本中被标记为 @Deprecated（推荐使用异步延迟加载的 loadDeferredContext），
+	// 但理解它对于掌握 Spring Security 的请求/响应包装机制至关重要。
+	// 从 Session 中“捞出”安全上下文，并给当前的 Request 和 Response 套上“监控外壳”。
 	@Deprecated
 	@Override
 	public SecurityContext loadContext(HttpRequestResponseHolder requestResponseHolder) {
+		// 尝试从 Session 中读取
 		HttpServletRequest request = requestResponseHolder.getRequest();
 		HttpServletResponse response = requestResponseHolder.getResponse();
+		//  getSession(false) 保证不会在读取时创建新 Session
 		HttpSession httpSession = request.getSession(false);
 		SecurityContext context = readSecurityContextFromSession(httpSession);
 		if (context == null) {
+			// 接口契约：根据 SecurityContextRepository 接口的定义，该方法严禁返回 null。因此，如果 Session 里没东西，就必须生成一个初始化的、没有任何认证信息的空上下文。
 			context = generateNewContext();
 			if (this.logger.isTraceEnabled()) {
 				this.logger.trace(LogMessage.format("Created %s", context));
 			}
 		}
+		// 第三阶段：核心黑魔法——包装 Request 和 Response
+		// 为什么要包装？
+		// 这是为了实现自动持久化。
+		// SaveToSessionResponseWrapper：它继承自 HttpServletResponseWrapper。它会拦截 sendRedirect()、sendError() 以及响应流的关闭动作。当这些事件发生时，包装器会感知到“请求快结束了”，并自动调用 saveContext 将 SecurityContextHolder 里的最新内容存回 Session。
 		if (response != null) {
 			SaveToSessionResponseWrapper wrappedResponse = new SaveToSessionResponseWrapper(response, request,
 					httpSession != null, context);
@@ -203,6 +221,7 @@ public class HttpSessionSecurityContextRepository implements SecurityContextRepo
 	/**
 	 * @param httpSession the session obtained from the request.
 	 */
+	// 从HTTPSession中读取安全上下文
 	private SecurityContext readSecurityContextFromSession(HttpSession httpSession) {
 		if (httpSession == null) {
 			this.logger.trace("No HttpSession currently exists");

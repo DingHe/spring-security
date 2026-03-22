@@ -75,23 +75,26 @@ import org.springframework.util.Assert;
  *
  * @author Ben Alex
  */
+// AbstractUserDetailsAuthenticationProvider 是 Spring Security 中最常用的抽象类之一。它为基于“用户名/密码”的认证提供了标准的模板流程，其最著名的子类就是 DaoAuthenticationProvider。
+// 该类的核心作用是实现认证流程的标准化模板。
+// 它封装了认证过程中的通用逻辑（如缓存检查、账号状态校验、异常处理），而将“如何获取用户信息”和“如何校验密码”等具体实现留给子类。
 public abstract class AbstractUserDetailsAuthenticationProvider
 		implements AuthenticationProvider, InitializingBean, MessageSourceAware {
 
 	protected final Log logger = LogFactory.getLog(getClass());
 
 	protected MessageSourceAccessor messages = SpringSecurityMessageSource.getAccessor();
-
+	// 用户缓存。默认为空实现。开启后可减少对数据库（UserDetailsService）的频繁查询。
 	private UserCache userCache = new NullUserCache();
-
+	// 是否强制将用户名作为 Principal 返回。默认为 false（即返回完整的 UserDetails 对象）。
 	private boolean forcePrincipalAsString = false;
-
+	// 安全性关键属性。默认为 true。若设为 false，则会区分“用户名不存在”和“密码错误”。默认为 true 是为了防止用户名枚举攻击。
 	protected boolean hideUserNotFoundExceptions = true;
-
+	// 预检逻辑。在比对密码前，检查账号是否被锁定、禁用、过期
 	private UserDetailsChecker preAuthenticationChecks = new DefaultPreAuthenticationChecks();
-
+	// 后检逻辑。在比对密码后，检查账号凭证（密码）是否过期。
 	private UserDetailsChecker postAuthenticationChecks = new DefaultPostAuthenticationChecks();
-
+	// 权限映射器。用于在认证成功后对用户的权限进行转换或格式化。
 	private GrantedAuthoritiesMapper authoritiesMapper = new NullAuthoritiesMapper();
 
 	/**
@@ -121,14 +124,17 @@ public abstract class AbstractUserDetailsAuthenticationProvider
 		Assert.notNull(this.postAuthenticationChecks, "A post authentication checks must be set");
 		doAfterPropertiesSet();
 	}
-
+	// 这个方法遵循了一个严谨的模板执行顺序，其设计的核心在于**性能（缓存）与安全性（异常处理）**的平衡。
 	@Override
 	public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+		// 明确声明该 Provider 只认 UsernamePasswordAuthenticationToken。如果传入其他类型的 Token，直接抛出异常。
 		Assert.isInstanceOf(UsernamePasswordAuthenticationToken.class, authentication,
 				() -> this.messages.getMessage("AbstractUserDetailsAuthenticationProvider.onlySupports",
 						"Only UsernamePasswordAuthenticationToken is supported"));
+		// 获取用户输入的账号名。
 		String username = determineUsername(authentication);
 		boolean cacheWasUsed = true;
+		// 检索用户信息（优先缓存）
 		UserDetails user = this.userCache.getUserFromCache(username);
 		if (user == null) {
 			cacheWasUsed = false;
@@ -146,7 +152,9 @@ public abstract class AbstractUserDetailsAuthenticationProvider
 			Assert.notNull(user, "retrieveUser returned null - a violation of the interface contract");
 		}
 		try {
+			//  1. 预检（锁定、禁用、过期）
 			this.preAuthenticationChecks.check(user);
+			//  2. 核心比对（校验密码）
 			additionalAuthenticationChecks(user, (UsernamePasswordAuthenticationToken) authentication);
 		}
 		catch (AuthenticationException ex) {
@@ -160,7 +168,9 @@ public abstract class AbstractUserDetailsAuthenticationProvider
 			this.preAuthenticationChecks.check(user);
 			additionalAuthenticationChecks(user, (UsernamePasswordAuthenticationToken) authentication);
 		}
+		// 3. 后检（凭证是否过期）
 		this.postAuthenticationChecks.check(user);
+		// 如果是刚从库里取的，存入缓存
 		if (!cacheWasUsed) {
 			this.userCache.putUserInCache(user);
 		}
@@ -168,6 +178,7 @@ public abstract class AbstractUserDetailsAuthenticationProvider
 		if (this.forcePrincipalAsString) {
 			principalToReturn = user.getUsername();
 		}
+		// 构建成功 Token
 		return createSuccessAuthentication(principalToReturn, authentication, user);
 	}
 
