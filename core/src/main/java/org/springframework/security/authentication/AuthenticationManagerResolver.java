@@ -23,6 +23,8 @@ package org.springframework.security.authentication;
  * @author Josh Cummings
  * @since 5.2
  */
+// 在标准的 Spring Security 配置中，通常只有一个全局的 AuthenticationManager。但在复杂的企业级场景下，这种“一刀切”的方式往往不够用。
+// AuthenticationManagerResolver 的核心作用是：根据请求的上下文（Context），动态地决定使用哪一个认证管理器（AuthenticationManager）。
 public interface AuthenticationManagerResolver<C> {
 
 	/**

@@ -61,12 +61,20 @@ import org.springframework.util.Assert;
  * @see AuthenticationProvider
  * @see JwtDecoder
  */
+// JwtAuthenticationProvider 是 Spring Security OAuth2 资源服务器（Resource Server）架构中的核心组件。它充当了验证令牌与生成用户权限之间的桥梁。
+// 将一个加密的、不可读的 JWT 字符串，转变为 Spring Security 上下文可以理解的认证对象（Authentication）。
+// 具体来说，它完成了以下三件事：
+// 解码与验证：调用 JwtDecoder 检查令牌的签名是否正确、是否过期。
+// 模型转换：将解码后的 Jwt 对象（包含 Claims 声明）转换为 Spring Security 内部的 AbstractAuthenticationToken。
+// 权限映射：默认情况下，它负责将 JWT 中的 scope 或 scp 声明提取出来，并加上 SCOPE_ 前缀，作为用户的 GrantedAuthority（已授予的权限）。
 public final class JwtAuthenticationProvider implements AuthenticationProvider {
 
 	private final Log logger = LogFactory.getLog(getClass());
-
+	// 核心解密器。
+	// 这是一个 final 属性，在构造时注入。它负责处理复杂的密码学逻辑（如解析 Base64、验证 RSA 签名、检查 exp 过期时间等）。
 	private final JwtDecoder jwtDecoder;
-
+	// 策略转换器。它决定了如何从 Jwt 对象中提取信息并填充到认证令牌中。
+	// 默认实现会将 scope 映射为权限，但你可以通过 set 方法替换它，以支持自定义的角色映射逻辑（例如从 roles 声明中读取权限）。
 	private Converter<Jwt, ? extends AbstractAuthenticationToken> jwtAuthenticationConverter = new JwtAuthenticationConverter();
 
 	public JwtAuthenticationProvider(JwtDecoder jwtDecoder) {
@@ -82,15 +90,21 @@ public final class JwtAuthenticationProvider implements AuthenticationProvider {
 	 * @return A successful authentication
 	 * @throws AuthenticationException if authentication failed for some reason
 	 */
+	// 执行认证的核心入口方法。
 	@Override
 	public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+		// 强转类型：将传入的 Authentication 强制转换为 BearerTokenAuthenticationToken（这是 Filter 层传过来的原始令牌容器）。
 		BearerTokenAuthenticationToken bearer = (BearerTokenAuthenticationToken) authentication;
+		// 调用私有的 getJwt 方法进行解码。
+		// 解码的过程就是认证的过程
 		Jwt jwt = getJwt(bearer);
+		// 将 Jwt 变成 Spring 可用的 AbstractAuthenticationToken。
 		AbstractAuthenticationToken token = this.jwtAuthenticationConverter.convert(jwt);
 		if (token.getDetails() == null) {
 			token.setDetails(bearer.getDetails());
 		}
 		this.logger.debug("Authenticated token");
+		// 返回一个已认证（Authenticated）的令牌对象。
 		return token;
 	}
 

@@ -86,17 +86,26 @@ import org.springframework.web.client.RestTemplate;
  * @author Daeho Kwon
  * @since 5.2
  */
+// NimbusJwtDecoder 是 Spring Security OAuth2 中最核心的解码实现类。
+// 它通过包装 Nimbus JOSE + JWT 库，将底层的 JWT 解析、签名验证逻辑与 Spring Security 的 Jwt 模型结合起来。
+// NimbusJwtDecoder 的主要作用是：
+// 解析（Parsing）：将加密或签名的 JWT 字符串拆解为 Header、Payload 和 Signature。
+// 验证（Verification）：验证 JWT 的签名（JWS）是否合法，确保令牌未被篡改。
+// 转换（Conversion）：将 Payload 中的 Claims（声明）转换为 Java 的 Map 结构，并处理类型转换。
+// 校验（Validation）：通过可插拔的验证器检查令牌的有效期（exp）、发行者（iss）等业务逻辑。
 public final class NimbusJwtDecoder implements JwtDecoder {
 
 	private final Log logger = LogFactory.getLog(getClass());
 
 	private static final String DECODING_ERROR_MESSAGE_TEMPLATE = "An error occurred while attempting to decode the Jwt: %s";
-
+	// 核心处理器（来自 Nimbus 库）。负责具体的签名验证算法执行和 Claims 提取。
 	private final JWTProcessor<SecurityContext> jwtProcessor;
-
+	// 类型转换器。
+	// 负责将原始的 JSON Map 转换为 Spring Security 规范化的 Map<String, Object>。
 	private Converter<Map<String, Object>, Map<String, Object>> claimSetConverter = MappedJwtClaimSetConverter
 		.withDefaults(Collections.emptyMap());
-
+	// Spring 级别的验证器。
+	// 在签名验证通过后，执行如“令牌是否过期”等逻辑检查。
 	private OAuth2TokenValidator<Jwt> jwtValidator = JwtValidators.createDefault();
 
 	/**
@@ -134,15 +143,24 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 	 */
 	@Override
 	public Jwt decode(String token) throws JwtException {
+		// 目的：检查字符串是否符合 JWT 的三段式格式（Header.Payload.Signature）。
 		JWT jwt = parse(token);
+		// 背景知识：JWT 规范允许一种 none 算法，即没有签名的明文令牌（PlainJWT）。
+		// 安全逻辑：在生产环境中，接受 none 算法是极其危险的（任何人都可以伪造身份）。
 		if (jwt instanceof PlainJWT) {
 			this.logger.trace("Failed to decode unsigned token");
 			throw new BadJwtException("Unsupported algorithm of " + jwt.getHeader().getAlgorithm());
 		}
+		// 签名验证与转换 (Cryptographic Verification)
+		// 找钥匙：根据 Header 中的 kid 或配置的 jwkSetUri 获取公钥。
+		// 验签名：使用算法（如 RS256）计算签名并比对。
+		// 转模型：将 Nimbus 的底层对象转换为 Spring Security 统一的 Jwt 领域模型。
 		Jwt createdJwt = createJwt(token, jwt);
+		// 验证内容：即使签名是真的，令牌也可能已经失效。
 		return validateJwt(createdJwt);
 	}
-
+	// 将原始的 Base64 编码字符串初步解析为 Nimbus 库可识别的 JWT 对象。
+	// 这个阶段只负责“拆解”结构，并不负责“验证”签名。
 	private JWT parse(String token) {
 		try {
 			return JWTParser.parse(token);
@@ -155,14 +173,19 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 			throw new BadJwtException(String.format(DECODING_ERROR_MESSAGE_TEMPLATE, ex.getMessage()), ex);
 		}
 	}
-
+	// 负责调用底层的密码学引擎进行签名验证，并将结果转换为 Spring Security 的标准 Jwt 对象。
 	private Jwt createJwt(String token, JWT parsedJwt) {
 		try {
 			// Verify the signature
+			// jwtProcessor 会根据令牌 Header 中的算法（如 RS256）和密钥 ID（kid），从配置的密钥源（JWK Source）中获取对应的公钥。
 			JWTClaimsSet jwtClaimsSet = this.jwtProcessor.process(parsedJwt, null);
+			// 提取 Header
+			// 将原始 JWT 的 Header 部分（包含算法 alg、类型 typ 等）转换为一个通用的 Map 结构，以便后续存入 Spring 的 Jwt 对象。
 			Map<String, Object> headers = new LinkedHashMap<>(parsedJwt.getHeader().toJSONObject());
+			// 因为它会将 Nimbus 提取出的原始声明（通常是 JSON 基本类型）转换为更符合 Java 规范的类型。
 			Map<String, Object> claims = this.claimSetConverter.convert(jwtClaimsSet.getClaims());
 			// @formatter:off
+			// 构建 Jwt 领域模型
 			return Jwt.withTokenValue(token)
 					.headers((h) -> h.putAll(headers))
 					.claims((c) -> c.putAll(claims))
@@ -188,7 +211,7 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 			throw new BadJwtException(String.format(DECODING_ERROR_MESSAGE_TEMPLATE, ex.getMessage()), ex);
 		}
 	}
-
+	// 负责检查令牌的“合法性”（逻辑有效）。即使签名是真的，如果令牌已经过期或者签发者不匹配，该方法也会将其拦截。
 	private Jwt validateJwt(Jwt jwt) {
 		OAuth2TokenValidatorResult result = this.jwtValidator.validate(jwt);
 		if (result.hasErrors()) {
@@ -266,6 +289,8 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 	 * <a target="_blank" href="https://tools.ietf.org/html/rfc7517#section-5">JWK Set</a>
 	 * uri.
 	 */
+	// 专门负责根据 JWK Set URI（远程公钥集合地址）来构建解码器。这是多租户或标准 OAuth2 架构中最常用的构建方式。
+	// 该 Builder 的核心任务是配置如何从远程获取公钥并验证签名。它处理了网络请求、密钥缓存、算法过滤以及底层 Nimbus 处理器的定制化。
 	public static final class JwkSetUriJwtDecoderBuilder {
 
 		private static final JOSEObjectTypeVerifier<SecurityContext> JWT_TYPE_VERIFIER = new DefaultJOSEObjectTypeVerifier<>(
@@ -273,29 +298,30 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 
 		private static final JOSEObjectTypeVerifier<SecurityContext> NO_TYPE_VERIFIER = (header, context) -> {
 		};
-
+		// 获取 JWK 地址的函数。
+		// 之所以用 Function 是因为地址可能需要通过 RestOperations 动态解析。
 		private final Function<RestOperations, String> jwkSetUri;
 
 		private Function<JWKSource<SecurityContext>, Set<JWSAlgorithm>> defaultAlgorithms = (source) -> Set
 			.of(JWSAlgorithm.RS256);
-
+		// 校验 JWT Header 中的 typ 字段（默认为 JWT）。
 		private JOSEObjectTypeVerifier<SecurityContext> typeVerifier = JWT_TYPE_VERIFIER;
-
+		// 允许使用的签名算法集合（如 RS256, PS256）。如果为空，默认仅支持 RS256。
 		private final Set<SignatureAlgorithm> signatureAlgorithms = new HashSet<>();
-
+		// 用于发起 HTTP 请求的工具，默认使用 RestTemplate。
 		private RestOperations restOperations = new RestTemplate();
-
+		// JWK Set 的缓存实现，默认不缓存（NoOpCache）。
 		private Cache cache = new NoOpCache("default");
-
+		// 允许开发者直接修改底层的 ConfigurableJWTProcessor。
 		private Consumer<ConfigurableJWTProcessor<SecurityContext>> jwtProcessorCustomizer;
-
+		// 初始化构建器的最小必要状态。它确保了只要构建器存在，就至少拥有一个有效的公钥集合（JWK Set）地址。
 		private JwkSetUriJwtDecoderBuilder(String jwkSetUri) {
 			Assert.hasText(jwkSetUri, "jwkSetUri cannot be empty");
 			this.jwkSetUri = (rest) -> jwkSetUri;
 			this.jwtProcessorCustomizer = (processor) -> {
 			};
 		}
-
+		// 不再硬编码 JWK 的 URL，而是注入两个逻辑函数（Functions），让 URL 和算法在运行时动态推导出来。
 		private JwkSetUriJwtDecoderBuilder(Function<RestOperations, String> jwkSetUri,
 				Function<JWKSource<SecurityContext>, Set<JWSAlgorithm>> defaultAlgorithms) {
 			Assert.notNull(jwkSetUri, "jwkSetUri function cannot be null");
@@ -348,6 +374,8 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 		 * @return a {@link JwkSetUriJwtDecoderBuilder} for further configurations
 		 * @since 6.5
 		 */
+		// 控制是否开启对 JWT 头部 typ 字段的强校验。
+		// 在 JWT 规范中，typ 头部用于声明令牌的类型（如 JWT 或 at+jwt）。开启此功能后，底层 Nimbus 库会检查该字段。如果令牌中没有 typ 或值不是 JWT，校验将失败。
 		public JwkSetUriJwtDecoderBuilder validateType(boolean shouldValidateTypHeader) {
 			this.typeVerifier = shouldValidateTypHeader ? JWT_TYPE_VERIFIER : NO_TYPE_VERIFIER;
 			return this;
@@ -374,6 +402,7 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 		 * the algorithm list
 		 * @return a {@link JwkSetUriJwtDecoderBuilder} for further configurations
 		 */
+		// 允许你通过函数式编程（Consumer）的方式，直接操作内部存储签名算法的集合。
 		public JwkSetUriJwtDecoderBuilder jwsAlgorithms(Consumer<Set<SignatureAlgorithm>> signatureAlgorithmsConsumer) {
 			Assert.notNull(signatureAlgorithmsConsumer, "signatureAlgorithmsConsumer cannot be null");
 			signatureAlgorithmsConsumer.accept(this.signatureAlgorithms);
@@ -422,19 +451,24 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 			this.jwtProcessorCustomizer = jwtProcessorCustomizer;
 			return this;
 		}
-
+		// 告诉解析器，在面对一个特定的 JWT 时，应该去哪里找公钥，以及允许使用哪些算法来验证签名。
 		JWSKeySelector<SecurityContext> jwsKeySelector(JWKSource<SecurityContext> jwkSource) {
+			// 如果开发者没有通过 .jwsAlgorithm() 手动指定算法，系统将启动自动推导。
 			if (this.signatureAlgorithms.isEmpty()) {
 				return new JWSVerificationKeySelector<>(this.defaultAlgorithms.apply(jwkSource), jwkSource);
 			}
 			Set<JWSAlgorithm> jwsAlgorithms = new HashSet<>();
+			// 遍历开发者配置的白名单，将它们逐一“翻译”成 Nimbus 能听懂的格式。
 			for (SignatureAlgorithm signatureAlgorithm : this.signatureAlgorithms) {
 				JWSAlgorithm jwsAlgorithm = JWSAlgorithm.parse(signatureAlgorithm.getName());
 				jwsAlgorithms.add(jwsAlgorithm);
 			}
+			// 如果匹配，则从 jwkSource 中根据 kid 过滤出正确的公钥。
 			return new JWSVerificationKeySelector<>(jwsAlgorithms, jwkSource);
 		}
-
+		// 核心任务是将 Spring 的 RestOperations 和 Cache 桥接到 Nimbus 库的 JWKSource 接口上。
+		// 如果是 Issuer 自动发现 模式，它会先用 restOperations 去请求 OpenID 配置接口（.well-known/openid-configuration），从返回的 JSON 中提取出真正的 jwks_uri 地址。
+		// 核心在于 JWKSourceBuilder 的配置逻辑，它将 SpringJWKSource（Spring 实现的拉取逻辑）包装成了 Nimbus 能够使用的对象：
 		JWKSource<SecurityContext> jwkSource() {
 			String jwkSetUri = this.jwkSetUri.apply(this.restOperations);
 			return JWKSourceBuilder.create(new SpringJWKSource<>(this.restOperations, this.cache, jwkSetUri))
@@ -443,7 +477,7 @@ public final class NimbusJwtDecoder implements JwtDecoder {
 				.cache(this.cache instanceof NoOpCache)
 				.build();
 		}
-
+		// 任务是将之前定义的所有组件（密钥源、算法选择器、类型验证器）封装进一个 Nimbus 库的 JWTProcessor
 		JWTProcessor<SecurityContext> processor() {
 			JWKSource<SecurityContext> jwkSource = jwkSource();
 			ConfigurableJWTProcessor<SecurityContext> jwtProcessor = new DefaultJWTProcessor<>();

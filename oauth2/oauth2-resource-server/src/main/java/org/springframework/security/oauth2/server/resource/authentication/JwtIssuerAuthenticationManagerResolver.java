@@ -59,6 +59,11 @@ import org.springframework.util.Assert;
  * @author Josh Cummings
  * @since 5.3
  */
+// 在典型的 OAuth2 场景中，资源服务器通常只信任一个授权服务器（Issuer）。但在企业级应用或 SaaS 服务中，你可能需要同时信任多个授权服务器（例如：Google、GitHub 以及公司内部的 Keycloak）。
+// 该类的核心逻辑是：
+// 从传入的 JWT 令牌中解析出 iss（Issuer，发行者）声明。
+// 根据这个 iss 的值，动态地决定或创建一个专门为该发行者服务的 AuthenticationManager。
+// 使用该管理器完成后续的令牌校验（下载该发行者的公钥、验证签名等）。
 public final class JwtIssuerAuthenticationManagerResolver implements AuthenticationManagerResolver<HttpServletRequest> {
 
 	private final AuthenticationManager authenticationManager;
@@ -69,6 +74,7 @@ public final class JwtIssuerAuthenticationManagerResolver implements Authenticat
 	 * @param trustedIssuers an array of trusted issuers
 	 * @deprecated use {@link #fromTrustedIssuers(String...)}
 	 */
+	// 接收一组信任的 Issuer 字符串。
 	@Deprecated(since = "6.2", forRemoval = true)
 	public JwtIssuerAuthenticationManagerResolver(String... trustedIssuers) {
 		this(Set.of(trustedIssuers));
@@ -93,6 +99,7 @@ public final class JwtIssuerAuthenticationManagerResolver implements Authenticat
 	 * @param trustedIssuers an array of trusted issuers
 	 * @since 6.2
 	 */
+	// 接收一组信任的 Issuer 字符串。
 	public static JwtIssuerAuthenticationManagerResolver fromTrustedIssuers(String... trustedIssuers) {
 		return fromTrustedIssuers(Set.of(trustedIssuers));
 	}
@@ -157,11 +164,11 @@ public final class JwtIssuerAuthenticationManagerResolver implements Authenticat
 	public AuthenticationManager resolve(HttpServletRequest request) {
 		return this.authenticationManager;
 	}
-
+	// 根据令牌里的 iss 声明，实时寻找对应的认证管理器（AuthenticationManager）来执行验证。
 	private static class ResolvingAuthenticationManager implements AuthenticationManager {
-
+		// 它负责在不校验签名的情况下，预先解析 JWT 的 Payload，把 iss（签发者 URL）提取出来。
 		private final Converter<BearerTokenAuthenticationToken, String> issuerConverter = new JwtClaimIssuerConverter();
-
+		// 它维护了 Issuer URL 与具体 AuthenticationManager 之间的映射关系。它决定了“如果签发者是 A，就用 A 组装好的解码器”。
 		private final AuthenticationManagerResolver<String> issuerAuthenticationManagerResolver;
 
 		ResolvingAuthenticationManager(AuthenticationManagerResolver<String> issuerAuthenticationManagerResolver) {
@@ -181,6 +188,7 @@ public final class JwtIssuerAuthenticationManagerResolver implements Authenticat
 				throw ex;
 			}
 			try {
+				// 委托执行真正的认证
 				return authenticationManager.authenticate(authentication);
 			}
 			catch (AuthenticationException ex) {
@@ -213,26 +221,37 @@ public final class JwtIssuerAuthenticationManagerResolver implements Authenticat
 		}
 
 	}
-
+	// 主要职责是：针对受信任的发行者（Issuer），动态创建并缓存对应的 AuthenticationManager。
+	// 这个类的作用可以形象地比喻为一个“认证中心仓库”：
+	// 当一个请求带着某个 Issuer 进来时，它先检查这个 Issuer 是否在“白名单”（受信任）中。
+	// 如果在白名单中，它会检查仓库里是否已经造好了针对这个 Issuer 的“校验器”。
+	// 如果没造好，它会实时去该 Issuer 的服务器下载公钥配置（OIDC Discovery）并造一个，然后存进仓库（缓存）以备下次使用。
 	static class TrustedIssuerJwtAuthenticationManagerResolver implements AuthenticationManagerResolver<String> {
 
 		private final Log logger = LogFactory.getLog(getClass());
-
+		// 核心缓存。
+		// 使用 ConcurrentHashMap 确保多线程安全。Key 是 Issuer 的 URL，Value 是已经构建好的认证管理器。
 		private final Map<String, AuthenticationManager> authenticationManagers = new ConcurrentHashMap<>();
-
+		// 信任断言。一个函数式接口，用于判断传入的 Issuer 字符串是否合法。
+		// 例如：iss -> iss.startsWith("https://auth.example.com")。
 		private final Predicate<String> trustedIssuer;
 
 		TrustedIssuerJwtAuthenticationManagerResolver(Predicate<String> trustedIssuer) {
 			this.trustedIssuer = trustedIssuer;
 		}
-
+		// 核心方法
 		@Override
 		public AuthenticationManager resolve(String issuer) {
+			// 如果返回 false，则直接进入 else 分支记录日志并返回 null。这意味着该令牌即使签名正确，但因为来源不可信，系统也会拒绝处理。
 			if (this.trustedIssuer.test(issuer)) {
+				// 如果缓存里有，直接拿；如果没有，执行 Lambda 表达式里的逻辑。
 				AuthenticationManager authenticationManager = this.authenticationManagers.computeIfAbsent(issuer,
 						(k) -> {
 							this.logger.debug("Constructing AuthenticationManager");
+							// 这行代码会发起网络请求（访问 issuer/.well-known/openid-configuration）。
+							// 它会自动获取该发行者的 JWK Set URI（公钥路径），并构建一个能够校验签名和有效期的 JwtDecoder。
 							JwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuer);
+							// 构建一个标准的 JWT 认证提供者，并将其 authenticate 方法封装为 AuthenticationManager 返回。
 							return new JwtAuthenticationProvider(jwtDecoder)::authenticate;
 						});
 				this.logger.debug(LogMessage.format("Resolved AuthenticationManager for issuer '%s'", issuer));

@@ -71,28 +71,43 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * Authorization Framework: Bearer Token Usage</a>
  * @see JwtAuthenticationProvider
  */
+// BearerTokenAuthenticationFilter 是 Spring Security OAuth2 资源服务器（Resource Server）核心组件。它的主要任务是拦截请求，从中提取 Bearer Token（通常是 JWT 或 Opaque Token），并将其交给认证管理器进行验证。
+// BearerTokenAuthenticationFilter 的核心职责可以概括为以下几点：
+// 令牌提取：从 HTTP 请求中（默认从 Authorization 请求头）提取 Bearer Token。
+// 身份验证请求封装：将提取到的字符串令牌封装成 BearerTokenAuthenticationToken 对象。
+// 调用认证管理器：利用 AuthenticationManager 对令牌进行验证（例如校验签名、有效期、权限等）。
+// 安全上下文管理：认证成功后，将认证结果存入 SecurityContextHolder，供后续过滤器或业务代码使用。
+// 错误处理：如果令牌无效或缺失，负责触发相应的失败处理器或返回 401 Unauthorized 响应。
+// 防止降级攻击：检查令牌是否为 DPoP 绑定的令牌，防止安全的 DPoP 令牌被作为普通 Bearer 令牌误用。
 public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
-
+	// 核心策略。
+	// 用于解析并返回适用于当前请求的 AuthenticationManager。
+	// 支持多租户场景（根据请求动态决定使用哪个认证管理器）。
 	private final AuthenticationManagerResolver<HttpServletRequest> authenticationManagerResolver;
-
+	// 存储策略。
+	// 定义如何存储和获取 SecurityContext，默认为本地线程（ThreadLocal）模式。
 	private SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder
 		.getContextHolderStrategy();
-
+	// 认证入口点。
+	// 当认证失败（如 Token 过期、无效）时，由它负责返回符合 RFC 6750 标准的错误响应头。
 	private AuthenticationEntryPoint authenticationEntryPoint = new BearerTokenAuthenticationEntryPoint();
-
+	// 失败处理器。
+	// 默认封装了 authenticationEntryPoint，用于统一处理认证异常。
 	private AuthenticationFailureHandler authenticationFailureHandler = new AuthenticationEntryPointFailureHandler(
 			(request, response, exception) -> this.authenticationEntryPoint.commence(request, response, exception));
-
+	// 令牌解析器。
+	// 定义从请求的哪个位置获取 Token，默认从 Authorization: Bearer <token> 获取。
 	private BearerTokenResolver bearerTokenResolver = new DefaultBearerTokenResolver();
-
+	// 详情源。用于构建 Web 认证详情（如远程 IP 地址、Session ID），并存入 Authentication 对象中。
 	private AuthenticationDetailsSource<HttpServletRequest, ?> authenticationDetailsSource = new WebAuthenticationDetailsSource();
-
+	// 上下文存储库。负责将 SecurityContext 持久化，以便在请求生命周期内或跨请求使用。
 	private SecurityContextRepository securityContextRepository = new RequestAttributeSecurityContextRepository();
 
 	/**
 	 * Construct a {@code BearerTokenAuthenticationFilter} using the provided parameter(s)
 	 * @param authenticationManagerResolver
 	 */
+	// 接收一个解析器。适用于需要根据请求动态选择认证逻辑的复杂场景。
 	public BearerTokenAuthenticationFilter(
 			AuthenticationManagerResolver<HttpServletRequest> authenticationManagerResolver) {
 		Assert.notNull(authenticationManagerResolver, "authenticationManagerResolver cannot be null");
@@ -103,6 +118,8 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
 	 * Construct a {@code BearerTokenAuthenticationFilter} using the provided parameter(s)
 	 * @param authenticationManager
 	 */
+	// 接收一个固定的认证管理器。
+	// 内部会将其包装成一个简单的解析器，始终返回该管理器。
 	public BearerTokenAuthenticationFilter(AuthenticationManager authenticationManager) {
 		Assert.notNull(authenticationManager, "authenticationManager cannot be null");
 		this.authenticationManagerResolver = (request) -> authenticationManager;
@@ -123,6 +140,7 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
 			throws ServletException, IOException {
 		String token;
 		try {
+			// 尝试获取 Token。
 			token = this.bearerTokenResolver.resolve(request);
 		}
 		catch (OAuth2AuthenticationException invalid) {
@@ -131,23 +149,29 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
 			return;
 		}
 		if (token == null) {
+		// 无 Token 处理：如果 token == null，说明当前请求不带 Bearer Token。此时执行 filterChain.doFilter 让请求继续流向后续过滤器（如匿名身份验证器），然后直接 return。
 			this.logger.trace("Did not process request since did not find bearer token");
 			filterChain.doFilter(request, response);
 			return;
 		}
-
+		// 认证请求封装
 		BearerTokenAuthenticationToken authenticationRequest = new BearerTokenAuthenticationToken(token);
 		authenticationRequest.setDetails(this.authenticationDetailsSource.buildDetails(request));
 
 		try {
+			// 通过解析器获取当前请求对应的 AuthenticationManager。
 			AuthenticationManager authenticationManager = this.authenticationManagerResolver.resolve(request);
+			// 调用 authenticate 方法。
+			// 此时，系统通常会委派给 JwtAuthenticationProvider 或 OpaqueTokenAuthenticationProvider 来验证令牌的签名、有效期和权限。
 			Authentication authenticationResult = authenticationManager.authenticate(authenticationRequest);
+			// DPoP (Demonstrating Proof-of-Possession) 是一种比普通 Bearer Token 更安全的机制。如果一个令牌在签发时是绑定了客户端私钥（DPoP）的，那么它严禁作为普通 Bearer Token 发送
 			if (isDPoPBoundAccessToken(authenticationResult)) {
 				// Prevent downgraded usage of DPoP-bound access tokens,
 				// by rejecting a DPoP-bound access token received as a bearer token.
 				BearerTokenError error = BearerTokenErrors.invalidToken("Invalid bearer token");
 				throw new OAuth2AuthenticationException(error);
 			}
+			// 成功后的上下文持久化 (Success Handling)
 			SecurityContext context = this.securityContextHolderStrategy.createEmptyContext();
 			context.setAuthentication(authenticationResult);
 			this.securityContextHolderStrategy.setContext(context);

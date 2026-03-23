@@ -32,6 +32,10 @@ import org.springframework.util.Assert;
  * @author Rafiullah Hamedy
  * @since 5.1
  */
+// JwtDecoders 是 Spring Security OAuth2 中的一个工具类（Utility Class），它采用了设计模式中的“工厂模式”，专门负责根据授权服务器的地址自动构建 JwtDecoder 实例。
+// 在 OAuth2 资源服务器中，校验 JWT 需要知道发行者的公钥。手动配置这些信息（如公钥 URL、加密算法等）非常繁琐。
+// JwtDecoders 的主要作用是利用 OpenID Connect (OIDC) Discovery 或 RFC 8414 (OAuth 2.0 Authorization Server Metadata) 协议，通过给定的 issuer（发行者）URL，自动从远程服务器拉取元数据配置，并生成一个完全配置好的解码器。
+
 public final class JwtDecoders {
 
 	private JwtDecoders() {
@@ -50,6 +54,9 @@ public final class JwtDecoders {
 	 * @return a {@link JwtDecoder} that was initialized by the OpenID Provider
 	 * Configuration.
 	 */
+	// 严格按照 OpenID Connect 发现协议创建解码器。
+	// 参数：oidcIssuerLocation 是发行者的基础 URL（例如 https://accounts.google.com）。
+	// 适用场景：明确知道对方是一个标准的 OIDC 提供商时使用。
 	@SuppressWarnings("unchecked")
 	public static <T extends JwtDecoder> T fromOidcIssuerLocation(String oidcIssuerLocation) {
 		Assert.hasText(oidcIssuerLocation, "oidcIssuerLocation cannot be empty");
@@ -86,10 +93,17 @@ public final class JwtDecoders {
 	 * "https://openid.net/specs/openid-connect-core-1_0.html#IssuerIdentifier">Issuer</a>
 	 * @return a {@link JwtDecoder} that was initialized by one of the described endpoints
 	 */
+	// 这是最通用、最推荐的方法，具有更强的兼容性。
+	// 参数：issuer 授权服务器地址。
+	// 依次（串行）查询三个不同的端点，直到一个成功为止：
+	// RFC 8414 兼容路径：host/.well-known/openid-configuration/path
+	// 标准 OIDC 路径：issuer/.well-known/openid-configuration
+	// OAuth 2.0 元数据路径：host/.well-known/oauth-authorization-server/path
 	@SuppressWarnings("unchecked")
 	public static <T extends JwtDecoder> T fromIssuerLocation(String issuer) {
 		Assert.hasText(issuer, "issuer cannot be empty");
 		NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withIssuerLocation(issuer).build();
+		// 确保解码后的令牌不仅签名正确，其内部的 iss 声明也必须与预期的一致。
 		OAuth2TokenValidator<Jwt> jwtValidator = JwtValidators.createDefaultWithIssuer(issuer);
 		jwtDecoder.setJwtValidator(jwtValidator);
 		return (T) jwtDecoder;
