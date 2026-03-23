@@ -91,23 +91,30 @@ import org.springframework.web.filter.OncePerRequestFilter;
  *
  * @author Ben Alex
  */
+// BasicAuthenticationFilter 是 Spring Security 中用于处理 HTTP Basic 认证 的核心过滤器。它主要负责从 HTTP 请求头中提取身份凭证，并完成用户的身份验证。
+// 解析并执行 HTTP Basic 认证协议。
+// 探测凭证：检查请求头中是否包含 Authorization: Basic ...。
+// 提取并转化：将 Base64 编码的 username:password 提取出来，转换为 Spring Security 的认证请求对象。
+// 身份验证：通过 AuthenticationManager 验证用户名和密码。
+// 上下文存储：认证成功后，将结果存入 SecurityContextHolder，供后续的权限检查使用。
 public class BasicAuthenticationFilter extends OncePerRequestFilter {
-
+	// 决定如何存储和获取 SecurityContext。默认使用线程本地变量（ThreadLocal）。
 	private SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder
 		.getContextHolderStrategy();
-
+	// 认证失败后的处理器。通常会返回一个 401 Unauthorized 响应，并带上 WWW-Authenticate 头，提示浏览器弹出登录框。
 	private AuthenticationEntryPoint authenticationEntryPoint;
-
+	// 核心大脑。负责实际的认证逻辑（比对用户名和密码）。
 	private AuthenticationManager authenticationManager;
-
+	// 处理“记住我”功能。
+	// 如果认证成功且开启了此功能，会生成对应的 Remember-Me Cookie。
 	private RememberMeServices rememberMeServices = new NullRememberMeServices();
-
+	// 默认为 false。如果设为 true，认证失败时不会触发 entryPoint，而是继续执行后续过滤器（常用于允许匿名访问的场景）。
 	private boolean ignoreFailure = false;
-
+	// 解码 Base64 凭证时使用的字符集，默认为 UTF-8。
 	private String credentialsCharset = "UTF-8";
-
+	// 负责从 HttpServletRequest 中提取凭证。默认实现是 BasicAuthenticationConverter。
 	private AuthenticationConverter authenticationConverter = new BasicAuthenticationConverter();
-
+	// 负责在认证成功后持久化 SecurityContext。
 	private SecurityContextRepository securityContextRepository = new RequestAttributeSecurityContextRepository();
 
 	/**
